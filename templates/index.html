@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OpdDoc - AI Medical Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+
+<body>
+    <div class="bg-gradient"></div>
+
+    <div class="container">
+        <header class="header">
+            <div class="logo-container">
+                <div class="logo-circle">
+                    <svg width="32" height="32" viewBox="0 0 32 32">
+                        <path d="M16 4 L16 28 M4 16 L28 16" stroke="white" stroke-width="3" stroke-linecap="round" />
+                        <circle cx="16" cy="16" r="3" fill="white" />
+                    </svg>
+                </div>
+                <div>
+                    <h1>OpdDoc</h1>
+                    <p class="tagline">AI-Powered Clinical Triage</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- STEP 1 -->
+        <div id="step1" class="step active">
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="step-badge">Step 1 of 3</div>
+                    <h2>Tell us about yourself</h2>
+                </div>
+
+                <!-- About You Field -->
+                <div class="form-group">
+                    <label for="persona">
+                        <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+                                clip-rule="evenodd" />
+                        </svg>
+                        About You
+                    </label>
+                    <div class="input-with-mic">
+                        <input type="text" id="persona" placeholder="e.g., Male, 51, pre-diabetes" autocomplete="off">
+                        <button class="mic-btn" type="button" data-target="persona" title="Speak your answer">
+                            <svg class="mic-icon" width="18" height="18" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm-3 6a1 1 0 012 0 4 4 0 008 0 1 1 0 112 0 6 6 0 01-5 5.917V17h2a1 1 0 110 2H8a1 1 0 110-2h2v-1.083A6 6 0 014 10z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                    <small>Age, gender, medical conditions, medications</small>
+                </div>
+
+                <!-- Symptoms Field with split layout -->
+                <div class="form-group">
+                    <label for="symptoms">
+                        <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd"
+                                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                                clip-rule="evenodd" />
+                        </svg>
+                        Your Symptoms
+                    </label>
+
+                    <!-- Split panel: text left, upload right -->
+                    <div class="symptoms-panel">
+
+                        <!-- LEFT: textarea + mic -->
+                        <div class="symptoms-text-side">
+                            <div class="textarea-with-mic">
+                                <textarea id="symptoms" rows="5"
+                                    placeholder="Describe what you're experiencing in detail..."></textarea>
+                                <button class="mic-btn mic-btn-textarea" type="button" data-target="symptoms"
+                                    title="Speak your symptoms">
+                                    <svg class="mic-icon" width="18" height="18" fill="currentColor"
+                                        viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd"
+                                            d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm-3 6a1 1 0 012 0 4 4 0 008 0 1 1 0 112 0 6 6 0 01-5 5.917V17h2a1 1 0 110 2H8a1 1 0 110-2h2v-1.083A6 6 0 014 10z"
+                                            clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <small>Be specific about location, duration, severity</small>
+                        </div>
+
+                        <!-- DIVIDER -->
+                        <div class="symptoms-divider">
+                            <span>or</span>
+                        </div>
+
+                        <!-- RIGHT: file upload section -->
+                        <div class="symptoms-upload-side">
+                            <p class="upload-label">
+                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Upload a Report
+                            </p>
+                            <p class="upload-hint">Blood test reports or X-ray images only</p>
+
+                            <!-- File type selector -->
+                            <div class="upload-type-select-wrap">
+                                <svg class="sort-icon-left" width="14" height="14" fill="currentColor"
+                                    viewBox="0 0 20 20">
+                                    <path
+                                        d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h8a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h4a1 1 0 110 2H4a1 1 0 01-1-1z" />
+                                </svg>
+                                <select id="uploadType" class="upload-type-select">
+                                    <option value="">Choose file type…</option>
+                                    <option value="blood">🩸 Blood Test Report</option>
+                                    <option value="xray">🩻 X-ray Image</option>
+                                </select>
+                                <svg class="sort-chevron" width="12" height="12" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                        d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </div>
+
+                            <!-- Drop zone -->
+                            <label class="upload-dropzone" id="dropzone" for="fileInput">
+                                <input type="file" id="fileInput" accept="image/*,.pdf" hidden>
+                                <div class="dropzone-inner" id="dropzoneInner">
+                                    <svg class="upload-cloud-icon" width="32" height="32" fill="none"
+                                        stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                    </svg>
+                                    <span class="dropzone-text">Tap to upload or drag & drop</span>
+                                    <span class="dropzone-sub">JPG, PNG, PDF · Max 10 MB</span>
+                                </div>
+                                <div class="dropzone-preview hidden" id="dropzonePreview">
+                                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20"
+                                        style="color:#10B981">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3-3z"
+                                            clip-rule="evenodd" />
+                                    </svg>
+                                    <span id="uploadedFileName" class="uploaded-file-name"></span>
+                                    <button class="remove-file-btn" type="button" id="removeFileBtn" title="Remove">✕</button>
+                                </div>
+                            </label>
+
+                        </div>
+                    </div>
+                </div>
+
+                <button id="startBtn" class="btn btn-primary">
+                    <span>Start Assessment</span>
+                    <svg class="btn-arrow" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- STEP 2 -->
+        <div id="step2" class="step">
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="step-badge">Step 2 of 3</div>
+                    <h2>Follow-up Questions</h2>
+                    <p class="progress-text"><span id="progressText">Loading...</span></p>
+                </div>
+                <div id="questionsContainer" class="questions-container"></div>
+                <div style="display: flex; gap: 10px;">
+                    <button id="doctorBtn" class="btn btn-primary" style="display:none;">
+                        <span>Doctor Assessment</span>
+                        <svg class="btn-arrow" width="20" height="20" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                    </button>
+                    <button id="patientBtn" class="btn btn-success" style="display:none;">
+                        <span>Patient Summary</span>
+                        <svg class="btn-arrow" width="20" height="20" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 3 -->
+        <div id="step3" class="step">
+            <div class="glass-card consultation-notes">
+                <div class="card-header">
+                    <div class="step-badge">Step 3 of 3</div>
+                    <h2 id="step3Title">Consultation Notes</h2>
+                </div>
+
+                <!-- Mode Toggle Tabs -->
+                <div class="step3-mode-toggle">
+                    <button class="mode-tab active-tab" id="tabDoctor" onclick="switchView('doctor')">🩺 Doctor
+                        Assessment</button>
+                    <button class="mode-tab" id="tabPatient" onclick="switchView('patient')">👤 Patient Summary</button>
+                </div>
+
+                <!-- DOCTOR VIEW -->
+                <div id="doctorView">
+                    <div class="notes-section">
+                        <h3>
+                            <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                                <path fill-rule="evenodd"
+                                    d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            Reported Issue
+                        </h3>
+                        <p id="reportedIssue" class="notes-content"></p>
+                    </div>
+                    <div class="notes-section">
+                        <h3>
+                            <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            Key Findings
+                        </h3>
+                        <p id="keyFindings" class="notes-content"></p>
+                    </div>
+                    <div class="soap-sections">
+                        <div class="soap-section">
+                            <div class="soap-label">A</div>
+                            <div>
+                                <h4>Assessment</h4>
+                                <p id="soapA" class="soap-text"></p>
+                            </div>
+                        </div>
+                        <div class="soap-section">
+                            <div class="soap-label">P</div>
+                            <div>
+                                <h4>Plan</h4>
+                                <p id="soapP" class="soap-text"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="meta-info">
+                        <div class="meta-item">
+                            <span class="meta-label">Red Flags:</span>
+                            <span id="redFlags" class="meta-value"></span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Confidence:</span>
+                            <span id="confidence" class="meta-value"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PATIENT VIEW -->
+                <div id="patientView" style="display:none;">
+                    <div class="patient-summary-section">
+                        <h3>Diagnosis</h3>
+                        <p id="patientDiagnosis"></p>
+                    </div>
+                    <div class="patient-summary-section">
+                        <h3>Findings</h3>
+                        <p id="patientFindings"></p>
+                    </div>
+                    <div class="patient-summary-section">
+                        <h3>How It Was Found</h3>
+                        <p id="patientHowFound"></p>
+                    </div>
+                    <div class="patient-summary-section">
+                        <h3>Treatment Option</h3>
+                        <p id="patientTreatment"></p>
+                    </div>
+                    <div class="patient-summary-section">
+                        <h3>Recovery Period</h3>
+                        <p id="patientRecovery"></p>
+                    </div>
+                    <div class="patient-summary-section" style="display:flex; align-items:center; gap:1rem;">
+                        <div>
+                            <h3 style="margin-bottom:0.4rem;">Urgency Level</h3>
+                            <span id="patientUrgency" class="urgency-badge"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shared Disclaimer -->
+                <div class="disclaimer-box" style="margin-top:1.5rem;">
+                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd"
+                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    <p><strong>Medical Disclaimer:</strong> This is an AI-generated clinical impression for triage
+                        purposes only. It does NOT replace professional medical evaluation. If symptoms worsen or you
+                        have concerns, seek immediate medical attention.</p>
+                </div>
+
+                <!-- Recommended Doctors -->
+                <div class="doctors-section">
+                    <div class="doctors-header">
+                        <div class="doctors-title-row">
+                            <h3 class="doctors-heading">
+                                <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Recommended Doctors Near You
+                            </h3>
+                            <span class="doctors-count" id="doctorsCount"></span>
+                        </div>
+                        <div class="doctors-controls">
+                            <div class="doctor-search-wrap">
+                                <svg class="search-icon" width="15" height="15" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
+                                </svg>
+                                <input type="text" id="doctorSearch" class="doctor-search-input"
+                                    placeholder="Name or specialty…" oninput="filterAndSort()">
+                            </div>
+                            <div class="sort-wrapper">
+                                <svg class="sort-icon-left" width="15" height="15" fill="currentColor"
+                                    viewBox="0 0 20 20">
+                                    <path
+                                        d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h8a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h4a1 1 0 110 2H4a1 1 0 01-1-1z" />
+                                </svg>
+                                <select id="doctorSort" class="sort-select" onchange="filterAndSort()">
+                                    <option value="recommended">Recommended</option>
+                                    <option value="rating-desc">Rating: High → Low</option>
+                                    <option value="rating-asc">Rating: Low → High</option>
+                                    <option value="fee-asc">Fee: Low → High</option>
+                                    <option value="fee-desc">Fee: High → Low</option>
+                                    <option value="experience-desc">Experience: Most</option>
+                                    <option value="experience-asc">Experience: Least</option>
+                                    <option value="availability">Availability: Soonest</option>
+                                </select>
+                                <svg class="sort-chevron" width="13" height="13" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                        d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="doctors-grid" id="doctorsGrid"></div>
+                    <div id="doctorsEmpty" class="doctors-empty hidden">
+                        <svg width="38" height="38" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p>No doctors match your search.</p>
+                        <button class="clear-search-btn" onclick="clearDoctorSearch()">Clear Search</button>
+                    </div>
+                </div>
+
+                <!-- Booking Toast -->
+                <div id="bookingToast" class="booking-toast hidden">
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3-3z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    <span id="bookingToastMsg">Appointment booked!</span>
+                </div>
+
+                <button id="newConsultationBtn" class="btn btn-secondary" style="margin-top:1.5rem;">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>New Consultation</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="loadingOverlay" class="overlay hidden">
+            <div class="loading-card">
+                <div class="loading-spinner"></div>
+                <p id="loadingText">Processing...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OpdDoc - AI Medical Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="stylesheet" href="../static/css/main.css">
+</head>
+
+<body>
+    <div class="bg-gradient"></div>
+
+    <div class="container">
+       
+
+       
+
+        <!-- STEP 3 -->
+       
+                <!-- ===== RECOMMENDED DOCTORS ===== -->
+                <div class="doctors-section">
+
+                    <div class="doctors-header">
+                        <div class="doctors-title-row">
+                            <h3 class="doctors-heading">
+                                <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                </svg>
+                                Recommended Doctors Near You
+                            </h3>
+                            <span class="doctors-count" id="doctorsCount">6 docs</span>
+                        </div>
+
+                        <div class="doctors-controls">
+                            <!-- Search -->
+                            <div class="doctor-search-wrap">
+                                <svg class="search-icon" width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z"/>
+                                </svg>
+                                <input type="text" id="doctorSearch" class="doctor-search-input" placeholder="Name or specialty…" oninput="filterAndSort()">
+                            </div>
+
+                            <!-- Sort Dropdown -->
+                            <div class="sort-wrapper">
+                                <svg class="sort-icon-left" width="15" height="15" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h8a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h4a1 1 0 110 2H4a1 1 0 01-1-1z"/>
+                                </svg>
+                                <select id="doctorSort" class="sort-select" onchange="filterAndSort()">
+                                    <option value="recommended">Recommended</option>
+                                    <option value="rating-desc">Rating: High → Low</option>
+                                    <option value="rating-asc">Rating: Low → High</option>
+                                    <option value="fee-asc">Fee: Low → High</option>
+                                    <option value="fee-desc">Fee: High → Low</option>
+                                    <option value="experience-desc">Experience: Most</option>
+                                    <option value="experience-asc">Experience: Least</option>
+                                    <option value="availability">Availability: Soonest</option>
+                                </select>
+                                <svg class="sort-chevron" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic grid rendered by JS -->
+                    <div class="doctors-grid" id="doctorsGrid"></div>
+
+                    <!-- Empty state -->
+                    <div id="doctorsEmpty" class="doctors-empty hidden">
+                        <svg width="38" height="38" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <p>No doctors match your search.</p>
+                        <button class="clear-search-btn" onclick="clearDoctorSearch()">Clear Search</button>
+                    </div>
+                </div>
+
+                <!-- Booking Toast -->
+                <div id="bookingToast" class="booking-toast hidden">
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3-3z" clip-rule="evenodd"/>
+                    </svg>
+                    <span id="bookingToastMsg">Appointment booked!</span>
+                </div>
+
+                <button id="newConsultationBtn" class="btn btn-secondary" style="margin-top:1.5rem;">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>New Consultation</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="loadingOverlay" class="overlay hidden">
+            <div class="loading-card">
+                <div class="loading-spinner"></div>
+                <p id="loadingText">Processing...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="../static/js/main.js"></script>
+
+</body>
+
+</html>
