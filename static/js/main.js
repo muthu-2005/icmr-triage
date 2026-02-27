@@ -16,42 +16,42 @@ const translatedValues = {};              // { inputId: englishText } for Tamil�
 // ── Doctor Data ─────────────────────────────────────────────────────────
 const DOCTORS_DATA = [
     {
-        id: 1, name: 'Dr. John Smith', specialty: 'Dermatologist', experience: 6,
+        id: 1, name: 'Dr. Kavitha Subramanian', specialty: 'Dermatologist', experience: 6,
         rating: 4.8, reviews: 95, fee: 150, feeDisplay: '₹150',
         availability: 'Available Today', availabilityClass: 'available-today', availabilityOrder: 0,
         photo: 'https://randomuser.me/api/portraits/women/74.jpg',
         highlighted: true,
     },
     {
-        id: 2, name: 'Dr. Ananya Iyer', specialty: 'Dermatologist', experience: 10,
+        id: 2, name: 'Dr. Anbuselvi Murugesan', specialty: 'Dermatologist', experience: 10,
         rating: 4.8, reviews: 340, fee: 250, feeDisplay: '₹250',
         availability: 'Available Tomorrow', availabilityClass: 'available-tomorrow', availabilityOrder: 2,
         photo: 'https://randomuser.me/api/portraits/women/44.jpg',
         highlighted: true,
     },
     {
-        id: 3, name: 'Dr. Sarah Khan', specialty: 'Cardiologist', experience: 8,
+        id: 3, name: 'Dr. Senthilkumar Palaniswamy', specialty: 'Cardiologist', experience: 8,
         rating: 4.7, reviews: 120, fee: 100, feeDisplay: '₹100',
         availability: 'Next slot: 3:30 PM', availabilityClass: 'available-slot', availabilityOrder: 1,
-        photo: 'https://randomuser.me/api/portraits/women/4.jpg',
+        photo: 'https://randomuser.me/api/portraits/men/32.jpg',
     },
     {
-        id: 4, name: 'Dr. Alex Brown', specialty: 'Pediatrician', experience: 5,
+        id: 4, name: 'Dr. Meenakshi Sundaram', specialty: 'Pediatrician', experience: 5,
         rating: 4.9, reviews: 210, fee: 300, feeDisplay: '₹300',
         availability: 'Available Tomorrow', availabilityClass: 'available-tomorrow', availabilityOrder: 2,
         photo: 'https://randomuser.me/api/portraits/women/41.jpg',
     },
     {
-        id: 5, name: 'Dr. Priya Nair', specialty: 'General Physician', experience: 12,
+        id: 5, name: 'Dr. Vijayalakshmi Govindasamy', specialty: 'General Physician', experience: 12,
         rating: 4.6, reviews: 510, fee: 200, feeDisplay: '₹200',
         availability: 'Available Today', availabilityClass: 'available-today', availabilityOrder: 0,
         photo: 'https://randomuser.me/api/portraits/women/68.jpg',
     },
     {
-        id: 6, name: 'Dr. Rajan Mehta', specialty: 'Neurologist', experience: 15,
+        id: 6, name: 'Dr. Thirumoorthy Ramasamy', specialty: 'Neurologist', experience: 15,
         rating: 4.9, reviews: 289, fee: 400, feeDisplay: '₹400',
         availability: 'Next Week', availabilityClass: 'available-slot', availabilityOrder: 3,
-        photo: 'https://randomuser.me/api/portraits/women/49.jpg',
+        photo: 'https://randomuser.me/api/portraits/men/55.jpg',
     },
 ];
 
@@ -780,11 +780,9 @@ function sortDoctors(list, sortVal) {
     switch (sortVal) {
         case 'recommended':    return clone.sort((a,b) => a.id - b.id);
         case 'rating-desc':    return clone.sort((a,b) => b.rating - a.rating || b.reviews - a.reviews);
-        case 'rating-asc':     return clone.sort((a,b) => a.rating - b.rating || a.reviews - b.reviews);
         case 'fee-asc':        return clone.sort((a,b) => a.fee - b.fee);
         case 'fee-desc':       return clone.sort((a,b) => b.fee - a.fee);
         case 'experience-desc':return clone.sort((a,b) => b.experience - a.experience);
-        case 'experience-asc': return clone.sort((a,b) => a.experience - b.experience);
         case 'availability':   return clone.sort((a,b) => a.availabilityOrder - b.availabilityOrder);
         default: return clone;
     }
@@ -1014,11 +1012,9 @@ const UI_TRANSLATIONS = {
         'xray':         '🩻 எக்ஸ்-ரே படம்',
         'recommended':  'பரிந்துரைக்கப்பட்டது',
         'rating-desc':  'மதிப்பீடு: அதிகம் → குறைவு',
-        'rating-asc':   'மதிப்பீடு: குறைவு → அதிகம்',
         'fee-asc':      'கட்டணம்: குறைவு → அதிகம்',
         'fee-desc':     'கட்டணம்: அதிகம் → குறைவு',
         'experience-desc': 'அனுபவம்: அதிகம்',
-        'experience-asc':  'அனுபவம்: குறைவு',
         'availability': 'கிடைக்கும் நிலை: விரைவில்',
     },
 };
