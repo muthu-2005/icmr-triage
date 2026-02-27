@@ -141,6 +141,22 @@ body {
 
 .card-header {
     margin-bottom: 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+/* Reset: h2 and progress-text should still span full width below the badge row */
+.card-header .step-badge {
+    flex: 0 0 auto;
+}
+
+.card-header h2,
+.card-header p.progress-text {
+    flex: 0 0 100%;
+    width: 100%;
 }
 
 .step-badge {
@@ -273,12 +289,15 @@ body {
 .answer-input-wrapper {
     margin-top: 0.75rem;
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
-/* Step-2 answer input: keep same look as Step-1 inputs */
+/* Step-2 answer input: generous right padding for mic + send buttons inside */
 .answer-input {
     width: 100%;
-    padding: 0.875rem 3.5rem 0.875rem 1rem; /* extra right padding for both mic + send */
+    padding: 0.875rem 5.5rem 0.875rem 1rem;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
@@ -297,14 +316,14 @@ body {
 
 .answer-input::placeholder { color: var(--text-secondary); }
 
-/* Mic button inside Step-2 answer input */
+/* Mic button inside Step-2 answer input — sits left of the send button */
 .answer-mic-btn {
     position: absolute;
-    right: 3rem;          /* sit just left of the send button */
+    right: 3.25rem;
     top: 50%;
     transform: translateY(-50%);
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     border: none;
     border-radius: 8px;
     background: rgba(99, 102, 241, 0.15);
@@ -320,13 +339,79 @@ body {
 .answer-mic-btn:hover {
     background: rgba(99, 102, 241, 0.3);
     color: white;
-    transform: translateY(-50%) scale(1.08);
 }
 
 .answer-mic-btn.listening {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.25);
     color: #F87171;
     animation: micPulse 1s ease-in-out infinite;
+}
+
+/* ── Mic Processing State (Whisper transcription in progress) ────────────── */
+.mic-btn.processing,
+.answer-mic-btn.processing {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60A5FA;
+    pointer-events: none;
+    animation: none;
+}
+
+.mic-btn.processing::after,
+.answer-mic-btn.processing::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border: 2px solid transparent;
+    border-top-color: #3B82F6;
+    border-right-color: #3B82F6;
+    border-radius: 50%;
+    animation: micSpin 0.7s linear infinite;
+}
+
+/* Textarea mic processing — keep correct position */
+.mic-btn-textarea.processing {
+    transform: none;
+}
+
+@keyframes micSpin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Mic Stop Button (shown during recording & processing) ───────────────── */
+.mic-stop-btn {
+    position: absolute;
+    right: 3.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.25);
+    color: #F87171;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    z-index: 3;
+}
+
+.mic-stop-btn:hover {
+    background: rgba(239, 68, 68, 0.4);
+    color: #FCA5A5;
+}
+
+/* Stop button for Step 1 — inside input-with-mic */
+.input-with-mic .mic-stop-btn {
+    right: 0.75rem;
+}
+
+/* Stop button for textarea — top-right like the mic */
+.textarea-with-mic .mic-stop-btn {
+    top: 0.875rem;
+    right: 0.6rem;
+    transform: none;
 }
 
 /* Send button in Step-2 answer input */
@@ -335,8 +420,8 @@ body {
     right: 0.5rem;
     top: 50%;
     transform: translateY(-50%);
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     background: var(--primary);
     border: none;
     border-radius: 8px;
@@ -346,6 +431,7 @@ body {
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
+    z-index: 2;
 }
 
 .answer-send-btn:hover:not(:disabled) {
@@ -900,6 +986,16 @@ body {
     margin-bottom: 0.75rem;
 }
 
+/* When h3 is inside a section-header-row, remove its own bottom margin */
+.notes-section .section-header-row h3 {
+    margin-bottom: 0;
+}
+
+/* section-header-row inside notes-section gets the spacing instead */
+.notes-section .section-header-row {
+    margin-bottom: 0.75rem;
+}
+
 .notes-content {
     color: var(--text-secondary);
     line-height: 1.8;
@@ -1073,6 +1169,43 @@ body {
     background: rgba(255, 255, 255, 0.07);
     border-color: rgba(99, 102, 241, 0.35);
     transform: translateY(-2px);
+}
+
+/* ── Highly Recommended Doctor Cards ────────────────────────────────────── */
+.doctor-card-highlighted {
+    position: relative;
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(245, 158, 11, 0.08) 50%, rgba(139, 92, 246, 0.10) 100%);
+    border: 1.5px solid rgba(251, 191, 36, 0.40);
+    box-shadow: 0 4px 20px rgba(251, 191, 36, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.doctor-card-highlighted:hover {
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.20) 0%, rgba(245, 158, 11, 0.14) 50%, rgba(139, 92, 246, 0.16) 100%);
+    border-color: rgba(251, 191, 36, 0.60);
+    box-shadow: 0 8px 28px rgba(251, 191, 36, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    transform: translateY(-3px);
+}
+
+.highly-recommended-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    align-self: flex-start;
+    padding: 0.3rem 0.75rem;
+    background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+    margin-bottom: -0.15rem;
+}
+
+.highly-recommended-tag svg {
+    color: #FDE68A;
+    flex-shrink: 0;
 }
 
 .doctor-info {
@@ -1397,4 +1530,266 @@ body {
     .chat-avatar { width: 32px; height: 32px; }
     .chat-bubble { padding: 0.875rem 1rem; }
     .question-text { font-size: 0.95rem; }
+}
+/* ── Language Toggle Bar ─────────────────────────────────────────────────── */
+/* Global sticky toggle — sits between header and steps, always visible */
+.lang-toggle-bar.global-lang-toggle {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    padding: 0.5rem 0;
+    margin-bottom: 0.5rem;
+    pointer-events: none;   /* let clicks fall through except on the actual toggle */
+}
+
+.lang-toggle-bar .lang-toggle-wrap {
+    pointer-events: auto;
+}
+
+.lang-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 999px;
+    padding: 0.45rem 1rem 0.45rem 0.75rem;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Responsive: 768px (tablets & large phones) ─────────────────────── */
+@media (max-width: 768px) {
+    /* Lang toggle — sticky on tablet */
+    .lang-toggle-bar.global-lang-toggle {
+        padding: 0.4rem 0;
+    }
+
+    .lang-toggle-wrap {
+        gap: 0.5rem;
+        padding: 0.4rem 0.75rem 0.4rem 0.6rem;
+    }
+
+    .lang-toggle-label {
+        font-size: 0.75rem;
+        min-width: 42px;
+    }
+
+    .lang-toggle-text {
+        font-size: 0.72rem;
+    }
+
+    .lang-toggle-track {
+        width: 36px;
+        height: 20px;
+    }
+
+    .lang-toggle-thumb {
+        width: 14px;
+        height: 14px;
+    }
+
+    .lang-toggle-btn.active .lang-toggle-thumb {
+        transform: translateX(16px);
+    }
+
+    /* Copy buttons — larger tap target */
+    .copy-icon-btn {
+        padding: 0.45rem 0.6rem;
+    }
+
+    /* PDF button — full width on tablet */
+    .pdf-download-row {
+        justify-content: stretch;
+    }
+
+    .btn-pdf-download {
+        width: 100%;
+        justify-content: center;
+        padding: 0.75rem 1.25rem;
+    }
+
+    .section-header-row {
+        gap: 0.4rem;
+    }
+}
+
+/* ── Responsive: 480px (small phones) ───────────────────────────────── */
+@media (max-width: 480px) {
+    /* Hide the "English / தமிழ்" label — keep track + arrow text only */
+    .lang-toggle-label {
+        display: none;
+    }
+
+    .lang-toggle-wrap {
+        gap: 0.4rem;
+        padding: 0.4rem 0.65rem;
+    }
+
+    .lang-toggle-bar.global-lang-toggle {
+        padding: 0.3rem 0;
+    }
+
+    /* Smaller copy icon */
+    .copy-icon-btn svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .copy-icon-btn {
+        padding: 0.4rem 0.5rem;
+    }
+
+    /* Section titles tighter */
+    .section-header-row h3 {
+        font-size: 0.95rem;
+    }
+
+    .section-header-row h4 {
+        font-size: 0.85rem;
+    }
+
+    /* PDF button */
+    .btn-pdf-download {
+        font-size: 0.82rem;
+        padding: 0.7rem 1rem;
+        border-radius: 10px;
+    }
+}
+
+.lang-toggle-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 50px;
+}
+
+.lang-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.lang-toggle-track {
+    position: relative;
+    width: 42px;
+    height: 22px;
+    background: rgba(99,102,241,0.25);
+    border-radius: 999px;
+    border: 1px solid rgba(99,102,241,0.4);
+    transition: background 0.25s ease;
+    display: block;
+}
+
+.lang-toggle-btn.active .lang-toggle-track {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    border-color: var(--primary);
+}
+
+.lang-toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.25s ease;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    display: block;
+}
+
+.lang-toggle-btn.active .lang-toggle-thumb {
+    transform: translateX(20px);
+}
+
+.lang-toggle-text {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary-light);
+    white-space: nowrap;
+}
+
+/* ── Copy Icon Buttons ───────────────────────────────────────────────────── */
+.section-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.section-header-row h3,
+.section-header-row h4 {
+    margin-bottom: 0 !important;
+}
+
+.copy-icon-btn {
+    background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.copy-icon-btn:hover {
+    background: rgba(99,102,241,0.25);
+    border-color: var(--primary);
+    color: var(--primary-light);
+}
+
+.copy-icon-btn.copied {
+    background: rgba(16,185,129,0.2);
+    border-color: #10B981;
+    color: #10B981;
+}
+
+/* ── PDF Download Button ─────────────────────────────────────────────────── */
+.pdf-download-row {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.btn-pdf-download {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1.25rem;
+    background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(239,68,68,0.3);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.btn-pdf-download:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(239,68,68,0.4);
+}
+
+.btn-pdf-download:active {
+    transform: translateY(0);
 }

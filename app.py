@@ -12,10 +12,20 @@ Architecture:
     start_consultation → request_questions → submit_answer (×3-5) →
     generate_soap | generate_patient_summary → soap_generated event
 
+Voice Pipeline:
+  Whisper Medium GGML (Vulkan GPU via whisper-cli.exe) → Tamil/English STT
+  VAD (webrtcvad) → speech-frame detection + silence trimming
+  ffmpeg (C:\ffmpeg) → audio format conversion (webm → 16kHz mono WAV)
+  TranslateGemma 4B GGUF (llama-server port 8080) → Tamil↔English translation
+
 GPU Backend:
   llama-server (llama.cpp) running MedGemma Q4_K_M via Vulkan on AMD Radeon 860M
-  Start server before running this app:
-    E:\llama-gpu\llama-server.exe -m E:\llama-gpu\medgemma-4b-Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096
+
+  Start BOTH servers before running this app:
+    Terminal 1 — TranslateGemma (translation):
+      E:\llama-gpu\llama-server.exe -m E:\llama-gpu\translategemma-4b-it.Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096
+    Terminal 2 — MedGemma (medical AI):
+      E:\llama-gpu\llama-server.exe -m E:\llama-gpu\medgemma-4b-Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8081 --ctx-size 4096
 """
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32,7 +42,11 @@ import gc
 import re
 import sys
 import uuid
+import wave
+import struct
 import socket
+import tempfile
+import subprocess
 import requests
 from pathlib import Path
 from collections import Counter
@@ -40,12 +54,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
-import torch
+import math
 import chromadb
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from sentence_transformers import SentenceTransformer
-from transformers import AutoProcessor
+from transformers import AutoTokenizer
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -63,9 +77,31 @@ class Config:
     # Model
     MODEL_ID = "google/medgemma-4b-it"
 
-    # Llama GPU Server
-    LLAMA_SERVER_URL = "http://127.0.0.1:8080"
+    # Llama GPU Server — MedGemma (medical AI)
+    LLAMA_SERVER_URL = "http://127.0.0.1:8081"
     LLAMA_TIMEOUT = 300  # seconds
+
+    # Llama GPU Server — TranslateGemma (Tamil ↔ English translation)
+    TRANSLATE_SERVER_URL = "http://127.0.0.1:8080"
+    TRANSLATE_TIMEOUT = 120  # seconds
+    TRANSLATE_MAX_TOKENS = 512
+
+    # ── Whisper Vulkan GPU ─────────────────────────────────────────────────
+    WHISPER_EXE = r"E:\whisper-vulkan\whisper-cli.exe"
+    MODEL       = r"E:\whisper-vulkan\ggml-medium.bin"
+    FFMPEG_PATH = r"C:\ffmpeg\bin\ffmpeg.exe"
+
+    # Whisper CLI options
+    WHISPER_THREADS = 4
+    WHISPER_LANGUAGE = "auto"          # auto-detect Tamil/English
+
+    # VAD settings (energy-based, pure Python — no C build tools needed)
+    VAD_FRAME_MS = 30                  # frame duration in ms
+    VAD_SAMPLE_RATE = 16000            # 16kHz for Whisper
+    VAD_PADDING_FRAMES = 10            # speech-boundary padding (frames)
+    VAD_MIN_SPEECH_FRAMES = 15         # minimum speech frames to keep (~450ms)
+    VAD_ENERGY_THRESHOLD = 0.015       # RMS threshold relative to max possible (auto-tuned)
+    VAD_DYNAMIC_FACTOR = 1.5           # multiplier above noise floor for speech detection
 
     # RAG
     CHROMA_PATH = r"E:\triage-engine\chroma-db"
@@ -209,15 +245,15 @@ def truncate_to_tokens(text: str, tokenizer, max_tokens: int) -> str:
     return tokenizer.decode(ids[:max_tokens], skip_special_tokens=True)
 
 
-def apply_chat(processor, user_text: str) -> str:
-    return processor.tokenizer.apply_chat_template(
+def apply_chat(tokenizer, user_text: str) -> str:
+    return tokenizer.apply_chat_template(
         [{"role": "user", "content": user_text}],
         tokenize=False, add_generation_prompt=True,
     )
 
 
 def generate_text(
-    processor, model, dev, chat_text: str, *,
+    chat_text: str, *,
     max_new_tokens: int, do_sample: bool = False,
     temperature: float = 0.0, top_p: float = 1.0,
     forbid_pad: bool = True, repetition_penalty: float = 1.3,
@@ -603,7 +639,255 @@ def post_clean(text: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 7. APPLICATION STATE
+# 7. VOICE PIPELINE — VAD + WHISPER VULKAN GPU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _convert_to_wav16k(input_path: str, output_path: str) -> bool:
+    """Convert any audio file to 16kHz mono 16-bit PCM WAV using ffmpeg."""
+    try:
+        cmd = [
+            Config.FFMPEG_PATH,
+            "-y",                     # overwrite output
+            "-i", input_path,         # input file
+            "-ar", "16000",           # 16kHz sample rate
+            "-ac", "1",               # mono
+            "-sample_fmt", "s16",     # 16-bit signed int
+            "-f", "wav",              # output format
+            output_path,
+        ]
+        result = subprocess.run(
+            cmd, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        if result.returncode != 0:
+            log(f"ffmpeg error: {result.stderr.decode(errors='replace')[:300]}")
+            return False
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 100
+    except Exception as e:
+        log(f"ffmpeg conversion failed: {e}")
+        return False
+
+
+def _read_wav_frames(wav_path: str, frame_ms: int = 30) -> Tuple[bytes, int, List[bytes]]:
+    """Read a 16kHz mono WAV and split into frames for VAD."""
+    with wave.open(wav_path, "rb") as wf:
+        assert wf.getnchannels() == 1, "Must be mono"
+        assert wf.getsampwidth() == 2, "Must be 16-bit"
+        sample_rate = wf.getframerate()
+        raw_data = wf.readframes(wf.getnframes())
+
+    frame_size = int(sample_rate * frame_ms / 1000) * 2  # 2 bytes per sample (16-bit)
+    frames = []
+    for i in range(0, len(raw_data) - frame_size + 1, frame_size):
+        frames.append(raw_data[i : i + frame_size])
+
+    return raw_data, sample_rate, frames
+
+
+def _frame_rms(frame_bytes: bytes) -> float:
+    """Calculate RMS energy of a 16-bit PCM audio frame."""
+    n_samples = len(frame_bytes) // 2
+    if n_samples == 0:
+        return 0.0
+    samples = struct.unpack(f"<{n_samples}h", frame_bytes)
+    sum_sq = sum(s * s for s in samples)
+    return math.sqrt(sum_sq / n_samples)
+
+
+def _vad_filter_speech(wav_path: str) -> str:
+    """
+    Energy-based Voice Activity Detection (pure Python, no C build tools).
+    Measures RMS energy per frame, auto-tunes threshold from the quietest
+    10% of frames (noise floor), keeps speech frames + padding.
+    Returns path to a new WAV with silence removed.
+    """
+    try:
+        raw_data, sample_rate, frames = _read_wav_frames(wav_path, Config.VAD_FRAME_MS)
+
+        if not frames:
+            log("VAD: no frames to process, using original audio")
+            return wav_path
+
+        # Calculate RMS energy for each frame
+        energies = [_frame_rms(f) for f in frames]
+
+        # Auto-tune threshold: use the quietest 10% as noise floor
+        sorted_energies = sorted(energies)
+        noise_count = max(1, len(sorted_energies) // 10)
+        noise_floor = sum(sorted_energies[:noise_count]) / noise_count
+
+        # Speech threshold = noise_floor × dynamic_factor, with a minimum absolute floor
+        # The absolute floor (500) handles near-silent recordings where noise_floor ≈ 0
+        threshold = max(
+            noise_floor * Config.VAD_DYNAMIC_FACTOR,
+            500.0  # absolute minimum RMS for 16-bit audio (~1.5% of max)
+        )
+
+        log(f"VAD: noise_floor={noise_floor:.0f} threshold={threshold:.0f} "
+            f"max_energy={max(energies):.0f}")
+
+        # Classify each frame as speech or silence
+        speech_flags = [e >= threshold for e in energies]
+
+        # Ring buffer: pad speech regions to avoid clipping word boundaries
+        padded = list(speech_flags)
+        padding = Config.VAD_PADDING_FRAMES
+        for i, flag in enumerate(speech_flags):
+            if flag:
+                for j in range(max(0, i - padding), min(len(padded), i + padding + 1)):
+                    padded[j] = True
+
+        # Collect speech frames
+        speech_frames = [f for f, keep in zip(frames, padded) if keep]
+        speech_count = len(speech_frames)
+        total_count = len(frames)
+
+        log(f"VAD: {speech_count}/{total_count} frames contain speech "
+            f"({100 * speech_count / max(total_count, 1):.0f}%)")
+
+        # If too few speech frames, use original audio (might be very short speech)
+        if speech_count < Config.VAD_MIN_SPEECH_FRAMES:
+            log("VAD: too few speech frames, using original audio")
+            return wav_path
+
+        # If almost all frames are speech, skip rewrite
+        if speech_count >= total_count * 0.9:
+            log("VAD: most frames are speech, using original audio")
+            return wav_path
+
+        # Write filtered WAV
+        vad_out = wav_path.replace(".wav", "_vad.wav")
+        with wave.open(vad_out, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(b"".join(speech_frames))
+
+        log(f"VAD: trimmed audio written → {os.path.getsize(vad_out)} bytes")
+        return vad_out
+
+    except Exception as e:
+        log(f"VAD processing error: {e}")
+        return wav_path  # fallback to original
+
+
+def _detect_language_from_output(text: str) -> str:
+    """Heuristic language detection from Whisper output text."""
+    if not text.strip():
+        return "en"
+    # Count Tamil Unicode characters (range: U+0B80 – U+0BFF)
+    tamil_chars = sum(1 for ch in text if "\u0B80" <= ch <= "\u0BFF")
+    total_alpha = sum(1 for ch in text if ch.isalpha())
+    if total_alpha == 0:
+        return "en"
+    tamil_ratio = tamil_chars / total_alpha
+    return "ta" if tamil_ratio > 0.3 else "en"
+
+
+def whisper_transcribe(audio_path: str) -> Tuple[str, str]:
+    """
+    Transcribe audio using whisper-cli.exe (Vulkan GPU).
+    Returns (text, language).
+    """
+    tmp_dir = tempfile.gettempdir()
+    wav_path = os.path.join(tmp_dir, f"whisper_{uuid.uuid4().hex[:8]}.wav")
+    vad_path = None
+
+    try:
+        # Step 1: Convert to 16kHz mono WAV
+        if not _convert_to_wav16k(audio_path, wav_path):
+            log("Whisper: ffmpeg conversion failed")
+            return "", "en"
+
+        wav_size = os.path.getsize(wav_path)
+        log(f"Whisper: WAV ready ({wav_size} bytes)")
+
+        # Step 2: VAD — trim silence, keep speech frames only
+        vad_path = _vad_filter_speech(wav_path)
+
+        # Step 3: Run whisper-cli.exe (Vulkan GPU)
+        cmd = [
+            Config.WHISPER_EXE,
+            "-m", Config.MODEL,
+            "-f", vad_path,
+            "-t", str(Config.WHISPER_THREADS),
+            "-l", "auto",
+            "--no-timestamps",
+            "--print-progress", "false",
+        ]
+
+        log(f"Whisper: running → {Path(Config.WHISPER_EXE).name}")
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=120,
+            cwd=str(Path(Config.WHISPER_EXE).parent),
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+
+        if result.returncode != 0:
+            stderr = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+            log(f"Whisper error (rc={result.returncode}): {stderr[:300]}")
+            return "", "en"
+
+        # Step 4: Parse stdout — decode as UTF-8 (handles Tamil output)
+        raw_output = (result.stdout or b"").decode("utf-8", errors="replace").strip()
+
+        # whisper-cli prints some info lines before the actual text;
+        # the transcription is typically after the last empty line or
+        # after lines starting with "whisper_" or "system_info"
+        lines = raw_output.split("\n")
+        text_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip whisper info/debug lines
+            if not stripped:
+                continue
+            if any(stripped.lower().startswith(p) for p in [
+                "whisper_", "system_info", "main:", "log_mel",
+                "processing", "output_", "encode", "decode",
+                "sampling", "beam_", "translate"
+            ]):
+                continue
+            # Skip timestamp lines like [00:00:00.000 --> 00:00:05.000]
+            if re.match(r"^\[?\d{2}:\d{2}[:\.]", stripped):
+                continue
+            text_lines.append(stripped)
+
+        text = " ".join(text_lines).strip()
+        # Clean up common artifacts
+        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"^\[.*?\]\s*", "", text)  # remove leading [timestamp]
+        text = text.strip()
+
+        # Step 5: Detect language from the transcribed text
+        language = _detect_language_from_output(text)
+
+        log(f"Whisper result: lang={language} | chars={len(text)} "
+            f"| preview=\"{text[:80]}{'...' if len(text) > 80 else ''}\"")
+
+        return text, language
+
+    except subprocess.TimeoutExpired:
+        log("Whisper: process timed out (120s)")
+        return "", "en"
+    except Exception as e:
+        log(f"Whisper transcription error: {e}")
+        import traceback
+        traceback.print_exc()
+        return "", "en"
+    finally:
+        # Cleanup temp files
+        for f in [wav_path, vad_path]:
+            if f and os.path.exists(f) and f != audio_path:
+                try:
+                    os.unlink(f)
+                except Exception:
+                    pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. APPLICATION STATE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
@@ -611,8 +895,10 @@ app.config["SECRET_KEY"] = Config.SECRET_KEY
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 STATE: Dict[str, Any] = {
-    "processor": None, "model": None, "device": None,
-    "collection": None, "embedder": None, "models_loaded": False,
+    "tokenizer": None, "model": None, "device": None,
+    "collection": None, "embedder": None,
+    "whisper_ready": False,
+    "models_loaded": False,
 }
 
 consultations: Dict[str, Dict[str, Any]] = {}
@@ -623,7 +909,7 @@ def log(msg: str) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 8. MODEL INITIALIZATION
+# 9. MODEL INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def initialize_models() -> bool:
@@ -633,11 +919,39 @@ def initialize_models() -> bool:
         log("=" * 60)
         log("INITIALIZING OPDDOC MEDGEMMA (GPU via llama-server)")
 
-        # Test llama server connection
+        # Test MedGemma llama-server connection (port 8081)
         resp = requests.get(f"{Config.LLAMA_SERVER_URL}/health", timeout=10)
         if resp.status_code != 200:
-            raise Exception("llama-server not responding")
-        log("✓ llama-server GPU backend connected (AMD Radeon 860M via Vulkan)")
+            raise Exception("MedGemma llama-server not responding on port 8081")
+        log("✓ MedGemma llama-server connected (port 8081, AMD Radeon 860M via Vulkan)")
+
+        # Test TranslateGemma llama-server connection (port 8080)
+        resp = requests.get(f"{Config.TRANSLATE_SERVER_URL}/health", timeout=10)
+        if resp.status_code != 200:
+            raise Exception("TranslateGemma llama-server not responding on port 8080")
+        log("✓ TranslateGemma llama-server connected (port 8080)")
+
+        # Whisper Vulkan GPU — validate paths
+        whisper_ok = True
+        if not os.path.isfile(Config.WHISPER_EXE):
+            log(f"✗ Whisper exe not found: {Config.WHISPER_EXE}")
+            whisper_ok = False
+        if not os.path.isfile(Config.MODEL):
+            log(f"✗ Whisper model not found: {Config.MODEL}")
+            whisper_ok = False
+        if not os.path.isfile(Config.FFMPEG_PATH):
+            log(f"✗ ffmpeg not found: {Config.FFMPEG_PATH}")
+            whisper_ok = False
+
+        if whisper_ok:
+            STATE["whisper_ready"] = True
+            log(f"✓ Whisper Vulkan GPU ready (whisper-cli.exe + ggml-medium.bin)")
+            log(f"  EXE:   {Config.WHISPER_EXE}")
+            log(f"  Model: {Config.MODEL}")
+            log(f"  ffmpeg: {Config.FFMPEG_PATH}")
+            log(f"  VAD:   energy-based (pure Python, threshold auto-tuned)")
+        else:
+            log("⚠ Whisper NOT available — voice input will be disabled")
 
         # ChromaDB
         client = chromadb.PersistentClient(path=Config.CHROMA_PATH)
@@ -648,17 +962,20 @@ def initialize_models() -> bool:
         STATE["embedder"] = SentenceTransformer(Config.EMBEDDER_ID)
         log("✓ Embedder ready")
 
-        # Processor (tokenizer only — model runs in llama-server)
-        STATE["processor"] = AutoProcessor.from_pretrained(
+        # Tokenizer only — model runs in llama-server (no vision processor needed)
+        STATE["tokenizer"] = AutoTokenizer.from_pretrained(
             Config.MODEL_ID, use_fast=True
         )
-        log("✓ Processor/tokenizer loaded")
+        log("✓ Tokenizer loaded (lightweight — no vision processor)")
 
-        STATE["device"] = torch.device("cpu")
-        STATE["model"] = None  # model runs in llama-server GPU process
+        STATE["device"] = "vulkan"   # informational — actual compute is in llama-server
+        STATE["model"] = None        # model runs in llama-server GPU process
         STATE["models_loaded"] = True
 
-        log("✓✓✓ ALL SYSTEMS READY — MedGemma running on AMD GPU ✓✓✓")
+        # Free any transient memory used during initialization
+        gc.collect()
+
+        log("✓✓✓ ALL SYSTEMS READY — MedGemma + TranslateGemma + Whisper Vulkan ✓✓✓")
         log("=" * 60)
         return True
 
@@ -670,7 +987,7 @@ def initialize_models() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 9. HTTP ROUTES
+# 10. HTTP ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/")
@@ -682,7 +999,9 @@ def index():
 def health():
     return jsonify({
         "status": "ready" if STATE["models_loaded"] else "loading",
-        "backend": "llama-server (AMD Vulkan GPU)",
+        "backend_medgemma": "llama-server (AMD Vulkan GPU) port 8081",
+        "backend_translate": "llama-server (AMD Vulkan GPU) port 8080",
+        "whisper": "whisper-cli.exe (Vulkan GPU) + VAD",
         "device": "AMD Radeon 860M",
     })
 
@@ -708,8 +1027,168 @@ def start_consultation():
                     "message": "Consultation started"})
 
 
+# ── 10b. Whisper Vulkan Speech-to-Text ─────────────────────────────────────
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe_audio():
+    """Transcribe audio using Whisper Vulkan GPU (whisper-cli.exe).
+    Pipeline: save upload → ffmpeg → VAD trim → whisper-cli → parse text."""
+    if not STATE.get("whisper_ready"):
+        return jsonify({"error": "Whisper not available"}), 503
+
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    tmp = None
+    try:
+        # Determine file extension from content type
+        suffix = ".webm"
+        content_type = audio_file.content_type or ""
+        if "wav" in content_type:
+            suffix = ".wav"
+        elif "mp4" in content_type or "m4a" in content_type:
+            suffix = ".m4a"
+        elif "ogg" in content_type:
+            suffix = ".ogg"
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        audio_file.save(tmp)
+        tmp.close()
+
+        file_size = os.path.getsize(tmp.name)
+        log(f"Whisper transcribing: {tmp.name} ({suffix}, {file_size} bytes)")
+
+        # Run the full pipeline: ffmpeg convert → VAD → whisper-cli
+        text, language = whisper_transcribe(tmp.name)
+
+        if not text:
+            return jsonify({"text": "", "language": "en"})
+
+        return jsonify({"text": text, "language": language})
+
+    except Exception as e:
+        log(f"Whisper error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Transcription failed: {str(e)}"}), 500
+
+    finally:
+        if tmp and os.path.exists(tmp.name):
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+
+
+# ── 10c. TranslateGemma Translation ──────────────────────────────────────────
+
+def _call_translate_server(prompt_text: str) -> str:
+    """Call TranslateGemma llama-server on port 8080."""
+    payload = {
+        "model": "translategemma",
+        "messages": [{"role": "user", "content": prompt_text}],
+        "max_tokens": Config.TRANSLATE_MAX_TOKENS,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "repeat_penalty": 1.2,
+        "stream": False,
+    }
+    try:
+        resp = requests.post(
+            f"{Config.TRANSLATE_SERVER_URL}/v1/chat/completions",
+            json=payload,
+            timeout=Config.TRANSLATE_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        log(f"TranslateGemma error: {e}")
+        return ""
+
+
+@app.route("/translate", methods=["POST"])
+def translate_text():
+    """Translate text between Tamil and English using TranslateGemma."""
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+
+    text = (data.get("text") or "").strip()
+    source = (data.get("source") or "").strip().lower()
+    target = (data.get("target") or "").strip().lower()
+
+    if not text:
+        return jsonify({"error": "No text to translate"}), 400
+    if source not in ("ta", "en") or target not in ("ta", "en"):
+        return jsonify({"error": "source and target must be 'ta' or 'en'"}), 400
+    if source == target:
+        return jsonify({"translated_text": text})
+
+    lang_names = {"ta": "Tamil", "en": "English"}
+    prompt = (
+        f"Translate the following {lang_names[source]} text to {lang_names[target]}. "
+        f"Output ONLY the complete translation in {lang_names[target]} script, nothing else.\n\n{text}"
+    )
+
+    log(f"Translate: {source}→{target} | chars={len(text)} "
+        f"| preview=\"{text[:60]}{'...' if len(text) > 60 else ''}\"")
+
+    translated = _call_translate_server(prompt)
+
+    if not translated:
+        return jsonify({"error": "Translation failed"}), 500
+
+    log(f"Translated: chars={len(translated)} "
+        f"| preview=\"{translated[:60]}{'...' if len(translated) > 60 else ''}\"")
+
+    return jsonify({"translated_text": translated})
+
+
+@app.route("/translate_ui_batch", methods=["POST"])
+def translate_ui_batch():
+    """Batch-translate an array of UI text strings using TranslateGemma.
+    Accepts: { "texts": ["Hello", "Start"], "source": "en", "target": "ta" }
+    Returns: { "translations": ["வணக்கம்", "தொடங்கு"] }
+    This endpoint is optional — the frontend uses a client-side dictionary by default
+    and only falls back here for dynamic text not in the dictionary.
+    """
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+
+    texts = data.get("texts", [])
+    source = (data.get("source") or "en").strip().lower()
+    target = (data.get("target") or "ta").strip().lower()
+
+    if not texts:
+        return jsonify({"translations": []})
+    if source == target:
+        return jsonify({"translations": texts})
+
+    lang_names = {"ta": "Tamil", "en": "English"}
+    if source not in lang_names or target not in lang_names:
+        return jsonify({"error": "source and target must be 'ta' or 'en'"}), 400
+
+    # Translate each text (could batch into one prompt for efficiency)
+    translations = []
+    for t in texts:
+        if not t.strip():
+            translations.append(t)
+            continue
+        prompt = (
+            f"Translate the following {lang_names[source]} text to {lang_names[target]}. "
+            f"Output ONLY the translation, nothing else.\n\n{t}"
+        )
+        result = _call_translate_server(prompt)
+        translations.append(result if result else t)
+
+    return jsonify({"translations": translations})
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# 10. SOCKET EVENTS
+# 11. SOCKET EVENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _followup_block(c: dict) -> str:
@@ -719,7 +1198,7 @@ def _followup_block(c: dict) -> str:
     )
 
 
-# ── 10a. Follow-up Questions ──────────────────────────────────────────────────
+# ── 11a. Follow-up Questions ──────────────────────────────────────────────────
 
 @socketio.on("request_questions")
 def on_request_questions(data):
@@ -733,15 +1212,15 @@ def on_request_questions(data):
     query = squash_ws(f"{c['persona']} {c['symptoms']}")
     hits = rag_retrieve(STATE["collection"], STATE["embedder"], query, Config.RAG_TOP_K)
     ctx_full, src = format_rag_context(hits)
-    ctx = truncate_to_tokens(ctx_full, STATE["processor"].tokenizer,
+    ctx = truncate_to_tokens(ctx_full, STATE["tokenizer"],
                              Config.RAG_MAX_TOKENS_QUESTIONS)
     c["rag_context"] = ctx
     c["rag_sources"] = src
 
     prompt = build_followup_prompt(c["persona"], c["symptoms"], ctx)
-    chat = apply_chat(STATE["processor"], prompt)
+    chat = apply_chat(STATE["tokenizer"], prompt)
     raw, _ = generate_text(
-        STATE["processor"], STATE["model"], STATE["device"], chat,
+        chat,
         max_new_tokens=150, forbid_pad=True,
     )
     questions = parse_followup_questions(raw)
@@ -754,7 +1233,7 @@ def on_request_questions(data):
     emit("questions_ready", {"questions": questions, "total": len(questions)})
 
 
-# ── 10b. Answer Intake ────────────────────────────────────────────────────────
+# ── 11b. Answer Intake ────────────────────────────────────────────────────────
 
 @socketio.on("submit_answer")
 def on_submit_answer(data):
@@ -775,7 +1254,7 @@ def on_submit_answer(data):
         emit("answer_received", {"next_index": c["current_q_index"]})
 
 
-# ── 10c. Doctor Assessment (SOAP) ────────────────────────────────────────────
+# ── 11c. Doctor Assessment (SOAP) ────────────────────────────────────────────
 
 @socketio.on("generate_soap")
 def on_generate_soap(data):
@@ -790,9 +1269,9 @@ def on_generate_soap(data):
 
     t0 = datetime.now()
     prompt = build_soap_prompt(c["persona"], c["symptoms"], fb, c["rag_context"])
-    chat = apply_chat(STATE["processor"], prompt)
+    chat = apply_chat(STATE["tokenizer"], prompt)
     text, _ = generate_text(
-        STATE["processor"], STATE["model"], STATE["device"], chat,
+        chat,
         max_new_tokens=Config.SOAP_MAX_TOKENS,
         do_sample=Config.SOAP_DO_SAMPLE,
         forbid_pad=True,
@@ -819,7 +1298,7 @@ def on_generate_soap(data):
     })
 
 
-# ── 10d. Patient Summary (two-pass) ──────────────────────────────────────────
+# ── 11d. Patient Summary (two-pass) ──────────────────────────────────────────
 
 @socketio.on("generate_patient_summary")
 def on_generate_patient_summary(data):
@@ -834,16 +1313,16 @@ def on_generate_patient_summary(data):
 
     t0 = datetime.now()
     patient_ctx = truncate_to_tokens(
-        c["rag_context"], STATE["processor"].tokenizer,
+        c["rag_context"], STATE["tokenizer"],
         Config.RAG_MAX_TOKENS_PATIENT,
     )
 
     # Pass 1
     log(f"[{cid[:8]}]   PASS1 generating...")
     prompt = build_patient_prompt(c["persona"], c["symptoms"], fb, patient_ctx)
-    chat = apply_chat(STATE["processor"], prompt)
+    chat = apply_chat(STATE["tokenizer"], prompt)
     raw1, _ = generate_text(
-        STATE["processor"], STATE["model"], STATE["device"], chat,
+        chat,
         max_new_tokens=Config.PATIENT_MAX_TOKENS,
         do_sample=Config.PATIENT_DO_SAMPLE,
         temperature=Config.PATIENT_TEMPERATURE,
@@ -860,9 +1339,9 @@ def on_generate_patient_summary(data):
     if n1 < Config.MIN_MODEL_SECTIONS:
         log(f"[{cid[:8]}]   PASS2 generating (only {n1}/6 sections, retrying)...")
         retry_prompt = build_patient_retry_prompt(c["persona"], c["symptoms"], fb)
-        retry_chat = apply_chat(STATE["processor"], retry_prompt)
+        retry_chat = apply_chat(STATE["tokenizer"], retry_prompt)
         raw2, _ = generate_text(
-            STATE["processor"], STATE["model"], STATE["device"], retry_chat,
+            retry_chat,
             max_new_tokens=Config.PATIENT_MAX_TOKENS,
             do_sample=True,
             temperature=Config.RETRY_TEMPERATURE,
@@ -898,21 +1377,28 @@ def on_generate_patient_summary(data):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 11. ENTRY POINT
+# 12. ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     print(f"\n{'=' * 60}")
     print("  OPDDOC MEDGEMMA — AI MEDICAL TRIAGE")
     print("  Backend: AMD Radeon 860M (Vulkan via llama-server)")
+    print("  Voice:   Whisper Vulkan GPU (whisper-cli.exe) + VAD")
     print(f"{'=' * 60}\n")
-    print("  Make sure llama-server is running:")
+    print("  Make sure BOTH llama-servers are running:\n")
+    print("  Terminal 1 — TranslateGemma (translation):")
+    print("  E:\\llama-gpu\\llama-server.exe -m E:\\llama-gpu\\translategemma-4b-it.Q4_K_M.gguf")
+    print("  -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096\n")
+    print("  Terminal 2 — MedGemma (medical AI):")
     print("  E:\\llama-gpu\\llama-server.exe -m E:\\llama-gpu\\medgemma-4b-Q4_K_M.gguf")
-    print(f"  -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096\n")
+    print(f"  -ngl 34 --host 127.0.0.1 --port 8081 --ctx-size 4096\n")
 
     if not initialize_models():
         print("\n✗ INITIALIZATION FAILED")
-        print("  Is llama-server running? Check http://127.0.0.1:8080/health")
+        print("  Are both llama-servers running?")
+        print("  Check http://127.0.0.1:8080/health (TranslateGemma)")
+        print("  Check http://127.0.0.1:8081/health (MedGemma)")
         sys.exit(1)
 
     local_ip = socket.gethostbyname(socket.gethostname())

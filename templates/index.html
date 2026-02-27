@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OpdDoc - AI Medical Assistant</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    
 </head>
 
 <body>
@@ -26,6 +27,21 @@
                 </div>
             </div>
         </header>
+
+        <!-- Language Toggle (always visible across all steps) -->
+        <div class="lang-toggle-bar global-lang-toggle">
+            <div class="lang-toggle-wrap">
+                <span class="lang-toggle-label" id="langLabel">English</span>
+                <button class="lang-toggle-btn" id="langToggleBtn" onclick="toggleLanguage()" aria-label="Toggle language" title="Switch language">
+                    <span class="lang-toggle-track">
+                        <span class="lang-toggle-thumb" id="langThumb"></span>
+                    </span>
+                    <span class="lang-toggle-text" id="langToggleText">EN → தமிழ்</span>
+                </button>
+            </div>
+        </div>
+
+        
 
         <!-- STEP 1 -->
         <div id="step1" class="step active">
@@ -203,48 +219,68 @@
 
                 <!-- Mode Toggle Tabs -->
                 <div class="step3-mode-toggle">
-                    <button class="mode-tab active-tab" id="tabDoctor" onclick="switchView('doctor')">🩺 Doctor
+                    <button class="mode-tab active-tab" id="tabDoctor">🩺 Doctor
                         Assessment</button>
-                    <button class="mode-tab" id="tabPatient" onclick="switchView('patient')">👤 Patient Summary</button>
+                    <button class="mode-tab" id="tabPatient">👤 Patient Summary</button>
                 </div>
 
                 <!-- DOCTOR VIEW -->
                 <div id="doctorView">
                     <div class="notes-section">
-                        <h3>
-                            <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
-                                <path fill-rule="evenodd"
-                                    d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z"
-                                    clip-rule="evenodd" />
-                            </svg>
-                            Reported Issue
-                        </h3>
+                        <div class="section-header-row">
+                            <h3>
+                                <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                                    <path fill-rule="evenodd"
+                                        d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Reported Issue
+                            </h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('reportedIssue', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="reportedIssue" class="notes-content"></p>
                     </div>
                     <div class="notes-section">
-                        <h3>
-                            <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd"
-                                    d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z"
-                                    clip-rule="evenodd" />
-                            </svg>
-                            Key Findings
-                        </h3>
+                        <div class="section-header-row">
+                            <h3>
+                                <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Key Findings
+                            </h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('keyFindings', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="keyFindings" class="notes-content"></p>
                     </div>
                     <div class="soap-sections">
                         <div class="soap-section">
                             <div class="soap-label">A</div>
-                            <div>
-                                <h4>Assessment</h4>
+                            <div style="flex:1;">
+                                <div class="section-header-row">
+                                    <h4>Assessment</h4>
+                                    <button class="copy-icon-btn" onclick="copySectionText('soapA', this)" title="Copy to clipboard">
+                                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                    </button>
+                                </div>
                                 <p id="soapA" class="soap-text"></p>
                             </div>
                         </div>
                         <div class="soap-section">
                             <div class="soap-label">P</div>
-                            <div>
-                                <h4>Plan</h4>
+                            <div style="flex:1;">
+                                <div class="section-header-row">
+                                    <h4>Plan</h4>
+                                    <button class="copy-icon-btn" onclick="copySectionText('soapP', this)" title="Copy to clipboard">
+                                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                    </button>
+                                </div>
                                 <p id="soapP" class="soap-text"></p>
                             </div>
                         </div>
@@ -264,31 +300,64 @@
                 <!-- PATIENT VIEW -->
                 <div id="patientView" style="display:none;">
                     <div class="patient-summary-section">
-                        <h3>Diagnosis</h3>
+                        <div class="section-header-row">
+                            <h3>Diagnosis</h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('patientDiagnosis', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="patientDiagnosis"></p>
                     </div>
                     <div class="patient-summary-section">
-                        <h3>Findings</h3>
+                        <div class="section-header-row">
+                            <h3>Findings</h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('patientFindings', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="patientFindings"></p>
                     </div>
                     <div class="patient-summary-section">
-                        <h3>How It Was Found</h3>
+                        <div class="section-header-row">
+                            <h3>How It Was Found</h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('patientHowFound', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="patientHowFound"></p>
                     </div>
                     <div class="patient-summary-section">
-                        <h3>Treatment Option</h3>
+                        <div class="section-header-row">
+                            <h3>Treatment Option</h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('patientTreatment', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="patientTreatment"></p>
                     </div>
                     <div class="patient-summary-section">
-                        <h3>Recovery Period</h3>
+                        <div class="section-header-row">
+                            <h3>Recovery Period</h3>
+                            <button class="copy-icon-btn" onclick="copySectionText('patientRecovery', this)" title="Copy to clipboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
                         <p id="patientRecovery"></p>
                     </div>
                     <div class="patient-summary-section" style="display:flex; align-items:center; gap:1rem;">
                         <div>
-                            <h3 style="margin-bottom:0.4rem;">Urgency Level</h3>
+                            <h3 style="margin-bottom:0.4rem;">Emergency Level</h3>
                             <span id="patientUrgency" class="urgency-badge"></span>
                         </div>
                     </div>
+                </div>
+
+                <!-- PDF Download Button -->
+                <div class="pdf-download-row" style="margin-top:1.5rem;">
+                    <button class="btn-pdf-download" id="pdfDownloadBtn" onclick="downloadPDF()">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Download as PDF
+                    </button>
                 </div>
 
                 <!-- Shared Disclaimer -->
