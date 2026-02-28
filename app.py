@@ -148,8 +148,8 @@ class Config:
     # ── Notification — WhatsApp & Email ────────────────────────────────────
     WHATSAPP_PHONE = "+918220934220"
     EMAIL_SENDER = "sixaxisstar@gmail.com"
-    EMAIL_APP_PASSWORD = "utuxttqvyrtebdge"
-    EMAIL_RECEIVER = "muthukumarg565@gmail.com"
+    EMAIL_APP_PASSWORD = "your-gmail-app-password"
+    EMAIL_RECEIVER = "receiver@gmail.com"
     EMAIL_SMTP_HOST = "smtp.gmail.com"
     EMAIL_SMTP_PORT = 587
 
