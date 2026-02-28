@@ -389,6 +389,7 @@ window.switchView = function(mode) {
     const patientView = document.getElementById('patientView');
     const tabDoctor  = document.getElementById('tabDoctor');
     const tabPatient = document.getElementById('tabPatient');
+    const doctorsSection = document.getElementById('doctorsSection');
 
     if (mode === 'doctor') {
         doctorView.style.display = 'block';
@@ -397,6 +398,7 @@ window.switchView = function(mode) {
         tabDoctor.style.display = '';
         tabPatient.style.display = 'none';
         document.getElementById('step3Title').textContent = 'Consultation Notes';
+        if (doctorsSection) doctorsSection.style.display = 'none';
     } else {
         doctorView.style.display = 'none';
         patientView.style.display = 'block';
@@ -406,6 +408,7 @@ window.switchView = function(mode) {
         document.getElementById('step3Title').textContent = sessionLanguage === 'ta'
             ? 'நோயாளி சுருக்கம்'
             : 'Patient Summary';
+        if (doctorsSection) doctorsSection.style.display = '';
     }
 };
 
@@ -904,10 +907,94 @@ window.bookAppointment = function(doctorName, doctorId) {
         }
     }
 
-    msg.textContent = `Appointment request sent to ${doctorName}!`;
-    toast.classList.remove('hidden');
-    clearTimeout(window._toastTimer);
-    window._toastTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+    // ── Helper: send notification with given SOAP clinical data ──────
+    function sendBookingNotification(clinicalData) {
+        const patientInfo = personaInput ? personaInput.value.trim() : '';
+        const doctor = DOCTORS_DATA.find(d => d.id === doctorId);
+
+        fetch('/book_appointment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                doctor_name: doctorName,
+                doctor_id: doctorId,
+                specialty: doctor ? doctor.specialty : '',
+                fee: doctor ? doctor.feeDisplay : '',
+                availability: doctor ? doctor.availability : '',
+                patient_info: patientInfo,
+                clinical: clinicalData,
+            }),
+        })
+        .then(resp => resp.json())
+        .then(data => {
+            console.log('Booking notification triggered:', data.message || data.status);
+            hideLoading();
+            msg.textContent = `Appointment confirmed for ${doctorName}!`;
+            toast.classList.remove('hidden');
+            clearTimeout(window._toastTimer);
+            window._toastTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+        })
+        .catch(err => {
+            console.warn('Booking notification request failed:', err);
+            hideLoading();
+        });
+    }
+
+    // ── Check if full SOAP (A + P) is already available ─────────────
+    const hasFullSoap = soapData && soapData.soap && soapData.soap.A && soapData.soap.A.trim() !== '';
+
+    if (hasFullSoap) {
+        // SOAP already generated (Doctor Assessment mode) — send directly
+        const clinicalData = {
+            reported_issue: soapData.reported_issue || '',
+            key_findings:   soapData.key_findings || '',
+            assessment:     soapData.soap.A || '',
+            plan:           soapData.soap.P || '',
+            red_flags:      soapData.soap.red_flags || '',
+            confidence:     soapData.soap.confidence || '',
+        };
+        msg.textContent = `Sending appointment to ${doctorName}...`;
+        toast.classList.remove('hidden');
+        sendBookingNotification(clinicalData);
+
+    } else {
+        // SOAP not available (Patient Summary mode) — generate it now
+        showLoading('booking an appointment...');
+        msg.textContent = `Preparing clinical report for ${doctorName}...`;
+        toast.classList.remove('hidden');
+        clearTimeout(window._toastTimer);
+
+        // Listen for SOAP result (one-time listener)
+        socket.once('soap_for_booking_ready', function(data) {
+            console.log('SOAP for booking received:', data);
+            const clinicalData = {
+                reported_issue: data.reported_issue || '',
+                key_findings:   data.key_findings || '',
+                assessment:     data.assessment || '',
+                plan:           data.plan || '',
+                red_flags:      data.red_flags || '',
+                confidence:     data.confidence || '',
+            };
+
+            // Also update the global soapData so subsequent bookings don't re-generate
+            if (soapData) {
+                soapData.soap = soapData.soap || {};
+                soapData.soap.A = data.assessment || '';
+                soapData.soap.P = data.plan || '';
+                soapData.soap.red_flags = data.red_flags || '';
+                soapData.soap.confidence = data.confidence || '';
+                soapData.reported_issue = data.reported_issue || soapData.reported_issue;
+                soapData.key_findings = data.key_findings || soapData.key_findings;
+            }
+
+            sendBookingNotification(clinicalData);
+        });
+
+        // Trigger SOAP generation on backend
+        socket.emit('generate_soap_for_booking', {
+            consultation_id: consultationId,
+        });
+    }
 };
 
 window.viewProfile = function(doctorId) {
@@ -939,7 +1026,7 @@ const UI_TRANSLATIONS = {
     // ── Step 1 ────────────────────────────────────────────────────────
     texts: {
         'OpdDoc':                       'OpdDoc',
-        'AI-Powered Clinical Triage':   'AI-இயங்கும் மருத்துவ தரவரிசை',
+        'AI-Powered Clinical Triage':   'AI-Powered Clinical Triage',
         'Step 1 of 3':                  'படி 1 / 3',
         'Step 2 of 3':                  'படி 2 / 3',
         'Step 3 of 3':                  'படி 3 / 3',

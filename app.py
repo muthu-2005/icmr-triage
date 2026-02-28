@@ -22,10 +22,10 @@ GPU Backend:
   llama-server (llama.cpp) running MedGemma Q4_K_M via Vulkan on AMD Radeon 860M
 
   Start BOTH servers before running this app:
-    Terminal 1 — TranslateGemma (translation):
-      E:\llama-gpu\llama-server.exe -m E:\llama-gpu\translategemma-4b-it.Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096
-    Terminal 2 — MedGemma (medical AI):
-      E:\llama-gpu\llama-server.exe -m E:\llama-gpu\medgemma-4b-Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8081 --ctx-size 4096
+    Terminal 1 — MedGemma (medical AI):
+      E:\llama-gpu\llama-server.exe -m E:\llama-gpu\medgemma-4b-Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096
+    Terminal 2 — TranslateGemma (translation):
+      E:\llama-gpu\llama-server.exe -m E:\llama-gpu\translategemma-4b-it.Q4_K_M.gguf -ngl 34 --host 127.0.0.1 --port 8081 --ctx-size 4096
 """
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -45,9 +45,13 @@ import uuid
 import wave
 import struct
 import socket
+import smtplib
 import tempfile
+import threading
 import subprocess
 import requests
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
@@ -78,11 +82,11 @@ class Config:
     MODEL_ID = "google/medgemma-4b-it"
 
     # Llama GPU Server — MedGemma (medical AI)
-    LLAMA_SERVER_URL = "http://127.0.0.1:8081"
+    LLAMA_SERVER_URL = "http://127.0.0.1:8080"
     LLAMA_TIMEOUT = 300  # seconds
 
     # Llama GPU Server — TranslateGemma (Tamil ↔ English translation)
-    TRANSLATE_SERVER_URL = "http://127.0.0.1:8080"
+    TRANSLATE_SERVER_URL = "http://127.0.0.1:8081"
     TRANSLATE_TIMEOUT = 120  # seconds
     TRANSLATE_MAX_TOKENS = 512
 
@@ -112,9 +116,11 @@ class Config:
     RAG_MAX_TOKENS_PATIENT = 200
 
     # ── Generation — SOAP (doctor) ────────────────────────────────────────────
-    SOAP_MAX_TOKENS = 900
-    SOAP_DO_SAMPLE = False
-    SOAP_REP_PENALTY = 1.3
+    SOAP_MAX_TOKENS = 1024
+    SOAP_DO_SAMPLE = True
+    SOAP_TEMPERATURE = 0.2
+    SOAP_TOP_P = 0.9
+    SOAP_REP_PENALTY = 1.4
 
     # ── Generation — Patient summary ──────────────────────────────────────────
     PATIENT_MAX_TOKENS = 500
@@ -138,6 +144,14 @@ class Config:
     # Follow-up questions
     MIN_QUESTIONS = 3
     MAX_QUESTIONS = 5
+
+    # ── Notification — WhatsApp & Email ────────────────────────────────────
+    WHATSAPP_PHONE = "+918220934220"
+    EMAIL_SENDER = "sixaxisstar@gmail.com"
+    EMAIL_APP_PASSWORD = "utuxttqvyrtebdge"
+    EMAIL_RECEIVER = "muthukumarg565@gmail.com"
+    EMAIL_SMTP_HOST = "smtp.gmail.com"
+    EMAIL_SMTP_PORT = 587
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -253,30 +267,40 @@ def apply_chat(tokenizer, user_text: str) -> str:
 
 
 def generate_text(
-    chat_text: str, *,
+    prompt_text: str, *,
     max_new_tokens: int, do_sample: bool = False,
     temperature: float = 0.0, top_p: float = 1.0,
     forbid_pad: bool = True, repetition_penalty: float = 1.3,
 ) -> Tuple[str, str]:
-    """Call llama-server GPU API and return (clean_text, raw_text)."""
+    """Call llama-server GPU API and return (clean_text, raw_text).
+
+    Pipeline:
+      1. Wrap raw prompt with the model's chat template via apply_chat()
+      2. Send to llama-server /completion endpoint (NOT /v1/chat/completions)
+         so the template is applied exactly once
+      3. Return the generated text
+    """
+    # Apply chat template — adds <start_of_turn>user ... model markers
+    chat_prompt = apply_chat(STATE["tokenizer"], prompt_text)
+
     payload = {
-        "model": "medgemma",
-        "messages": [{"role": "user", "content": chat_text}],
-        "max_tokens": int(max_new_tokens),
+        "prompt": chat_prompt,
+        "n_predict": int(max_new_tokens),
         "temperature": float(temperature) if do_sample else 0.0,
         "top_p": float(top_p) if do_sample else 1.0,
         "repeat_penalty": float(repetition_penalty),
         "stream": False,
+        "stop": ["<end_of_turn>", "<eos>"],
     }
     try:
         resp = requests.post(
-            f"{Config.LLAMA_SERVER_URL}/v1/chat/completions",
+            f"{Config.LLAMA_SERVER_URL}/completion",
             json=payload,
             timeout=Config.LLAMA_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
-        text = data["choices"][0]["message"]["content"].strip()
+        text = (data.get("content") or "").strip()
         return text, text
     except Exception as e:
         log(f"LLaMA server error: {e}")
@@ -288,47 +312,29 @@ def generate_text(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def build_followup_prompt(persona: str, symptoms: str, context: str) -> str:
-   return f"""You are a clinical triage assistant.
+   return f"""You are a doctor doing triage. A patient has come to you.
 
-Your task is to ask between 3 and 5 follow-up questions to better understand
-severity, pain level, red-flag danger signs, and any chronic complexity for safe triage.
+Patient: {persona}
+Symptoms: {symptoms}
 
-Use the following rule:
-- If symptoms sound clearly mild and low-risk → ask 3 questions.
-- If there is moderate pain, impact on function, or some risk factors → ask 4 questions.
-- If there is severe pain, red-flag–like features, or important chronic comorbidities → ask 5 questions.
-
-Guidelines for questions:
-- Each question must be clinically meaningful and non-redundant.
-- Prioritise questions that help distinguish between:
-  * mild/self-limited illness that can be observed at home
-  * illness needing routine in-person review
-  * illness needing urgent / emergency evaluation
-- Ask only ONE question per line.
-- Do NOT include bullets or words like "Question 1:". Use numeric prefixes only.
-- Always end each line with a '?'.
-
-Output format:
-- 3 to 5 lines.
-- Each line: "<number>. <question text>?"
-- Example:
-  1. How many days have you had the fever?
-  2. Are you able to drink and keep fluids down?
-  3. Do you have any difficulty breathing?
-
-Patient persona (may contain typos):
-
-{persona}
-
-Patient symptoms (may contain typos):
-
-{symptoms}
-
-Guideline excerpt:
-
+Reference (use only relevant parts):
 {context}
 
-Now output ONLY the numbered questions, one per line, no extra commentary.
+Based on the symptoms, ask 3 to 5 follow-up questions to assess severity and danger signs.
+Ask more questions if symptoms seem serious, fewer if mild.
+
+Rules:
+- One question per line, numbered 1. 2. 3. etc.
+- Each question must end with ?
+- Ask about: duration, severity, pain level, danger signs, chronic conditions
+- Be direct and clinical
+
+Example output:
+1. How many days have you had the fever?
+2. Are you able to drink and keep fluids down?
+3. Do you have any difficulty breathing?
+
+Write ONLY the numbered questions below, nothing else:
 """
 
 
@@ -368,43 +374,30 @@ def parse_followup_questions(text: str, min_q: int = 3, max_q: int = 5) -> List[
 
 def build_soap_prompt(persona: str, symptoms: str,
                       followup_block: str, context: str) -> str:
-    return f"""You are a clinical AI assistant. Based on this case, write a detailed medical assessment.
+    return f"""You are a medical doctor. Write a SOAP note for this patient.
 
-PATIENT:
-{persona}
+Patient: {persona}
+Chief complaint: {symptoms}
 
-CHIEF COMPLAINT:
-{symptoms}
-
-FOLLOW-UP DETAILS:
+Follow-up Q&A:
 {followup_block}
 
-CLINICAL GUIDELINE REFERENCE (may contain multiple conditions, some unrelated):
+Relevant clinical guidelines (ignore any unrelated conditions):
 {context}
 
-CRITICAL INSTRUCTIONS:
-- Use ONLY the parts of the guideline that are clearly relevant to THIS patient's current complaint.
-- Completely ignore any sections about other diseases, body parts, or treatments that do not match this case.
-- If the guideline discusses varicose veins, chronic venous insufficiency, or compression stockings and the patient has no leg symptoms, IGNORE those sections entirely and DO NOT mention them in the assessment or plan.
+Write the SOAP note now. Use only relevant guideline information. Do not use markdown.
 
-TASK:
-Write a SOAP note tailored to this specific patient.
+S: Summarize the patient's symptoms and follow-up answers in 3-5 medical sentences.
 
-Use this exact format:
+O: Remote triage, no vitals or physical exam. Note comorbidities if mentioned.
 
-S: [3–5 sentences summarizing the patient's symptoms and follow-up answers in clear medical language.]
+A: Name the most likely diagnosis. Explain why it fits. Mention 1-3 differentials. State this is a working impression, not confirmed. Write 200-300 words.
 
-O: [State that this is remote triage with no vitals or physical examination. Note any relevant comorbidities or risk factors if mentioned.]
+P: Safe treatment plan for this complaint only. Include home care, medications if needed, when to see a doctor, and danger signs for emergency care. Write 200-300 words.
 
-A: [200–300 words. Name the most likely diagnosis explicitly (e.g., "acne vulgaris", "upper respiratory tract infection", etc.). Explain why it fits this presentation. Mention 1–3 key differentials and why they are more or less likely. State that this is a working clinical impression, not a confirmed diagnosis.]
+RED_FLAGS: Yes or No
 
-P: [200–300 words. Provide a safe, guideline-consistent plan focused ONLY on the current complaint. Include home care, medications if appropriate, when to seek in-person review, and specific danger signs that should trigger urgent/emergency care. Do NOT mention leg procedures or venous interventions unless the current complaint involves the legs or veins.]
-
-RED_FLAGS: [Yes or No]
-
-CONFIDENCE: [decimal between 0.7 and 0.9]
-
-Write naturally and directly. Do not use markdown formatting like ** or ##.
+CONFIDENCE: A decimal between 0.7 and 0.9
 """
 
 
@@ -464,40 +457,33 @@ def parse_soap(narrative: str, persona: str, symptoms: str,
 
 def build_patient_prompt(persona: str, symptoms: str,
                          followup_block: str, context: str) -> str:
-    return f"""You are a friendly doctor explaining a patient's condition simply.
+    return f"""You are a friendly doctor explaining a patient's condition in simple language.
 
-PATIENT: {persona}
-SYMPTOMS: {symptoms}
-FOLLOW-UP Q&A:
+Patient: {persona}
+Symptoms: {symptoms}
+Follow-up Q&A:
 {followup_block}
-REFERENCE: {context}
+Reference: {context}
 
-RULES:
-1. Simple everyday English. No jargon.
-2. No markdown. No ** or ## or bullets. Plain sentences only.
-3. Each section: exactly 2-3 short sentences. NEVER write "Not Available".
-4. If reference lacks treatment info, give general advice (rest, fluids, see doctor).
-5. Stop after [URGENCY].
-
-FORMAT:
+Write each section in 2-3 simple sentences. No markdown, no bullets, no jargon. Stop after URGENCY.
 
 [DIAGNOSIS]
-2-3 sentences about what the problem likely is.
+What the problem likely is.
 
 [FINDINGS]
-2-3 sentences about which symptoms point to this.
+Which symptoms point to this.
 
 [HOW_FOUND]
-2-3 sentences about how this was figured out.
+How this was figured out.
 
 [TREATMENT]
-2-3 sentences about home care and when to see a doctor.
+Home care advice and when to see a doctor.
 
 [RECOVERY]
-2-3 sentences about how long recovery takes.
+How long recovery takes.
 
 [URGENCY]
-One word: Low, Moderate, or High. Then 1-2 sentences.
+One word (Low, Moderate, or High), then 1-2 sentences explaining why.
 """
 
 
@@ -919,17 +905,17 @@ def initialize_models() -> bool:
         log("=" * 60)
         log("INITIALIZING OPDDOC MEDGEMMA (GPU via llama-server)")
 
-        # Test MedGemma llama-server connection (port 8081)
+        # Test MedGemma llama-server connection
         resp = requests.get(f"{Config.LLAMA_SERVER_URL}/health", timeout=10)
         if resp.status_code != 200:
-            raise Exception("MedGemma llama-server not responding on port 8081")
-        log("✓ MedGemma llama-server connected (port 8081, AMD Radeon 860M via Vulkan)")
+            raise Exception(f"MedGemma llama-server not responding on {Config.LLAMA_SERVER_URL}")
+        log(f"✓ MedGemma llama-server connected ({Config.LLAMA_SERVER_URL})")
 
-        # Test TranslateGemma llama-server connection (port 8080)
+        # Test TranslateGemma llama-server connection
         resp = requests.get(f"{Config.TRANSLATE_SERVER_URL}/health", timeout=10)
         if resp.status_code != 200:
-            raise Exception("TranslateGemma llama-server not responding on port 8080")
-        log("✓ TranslateGemma llama-server connected (port 8080)")
+            raise Exception(f"TranslateGemma llama-server not responding on {Config.TRANSLATE_SERVER_URL}")
+        log(f"✓ TranslateGemma llama-server connected ({Config.TRANSLATE_SERVER_URL})")
 
         # Whisper Vulkan GPU — validate paths
         whisper_ok = True
@@ -1188,6 +1174,265 @@ def translate_ui_batch():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 10d. APPOINTMENT NOTIFICATIONS — WhatsApp & Email
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Appointment Schedule Dictionary ──────────────────────────────────────────
+# Maps availability labels (from frontend DOCTORS_DATA) to concrete slot info.
+# Extend or modify this dict as real scheduling data becomes available.
+
+APPOINTMENT_SCHEDULE = {
+    "Available Today": {
+        "date": "Today",
+        "time": "11:00 AM",
+        "slot_type": "Walk-in / Same Day",
+        "location": "OpdDoc Clinic, Ground Floor",
+        "notes": "Please arrive 15 minutes early for registration.",
+    },
+    "Available Tomorrow": {
+        "date": "Tomorrow",
+        "time": "10:00 AM",
+        "slot_type": "Pre-booked",
+        "location": "OpdDoc Clinic, Ground Floor",
+        "notes": "Carry any previous medical reports.",
+    },
+    "Next slot: 3:30 PM": {
+        "date": "Today",
+        "time": "3:30 PM",
+        "slot_type": "Afternoon Slot",
+        "location": "OpdDoc Clinic, Room 3",
+        "notes": "This is the next available slot. Please be on time.",
+    },
+    "Next Week": {
+        "date": "Next Monday",
+        "time": "9:30 AM",
+        "slot_type": "Advance Booking",
+        "location": "OpdDoc Clinic, Consultation Room 1",
+        "notes": "You will receive a reminder 24 hours before your appointment.",
+    },
+}
+
+_DEFAULT_SCHEDULE = {
+    "date": "To be confirmed",
+    "time": "To be confirmed",
+    "slot_type": "General",
+    "location": "OpdDoc Clinic",
+    "notes": "Our team will contact you shortly with the exact time.",
+}
+
+
+def _resolve_schedule(availability: str) -> Dict[str, str]:
+    """Look up the appointment schedule for a given availability label."""
+    return APPOINTMENT_SCHEDULE.get(availability, _DEFAULT_SCHEDULE)
+
+
+def send_whatsapp_notification(appt: Dict[str, Any]) -> None:
+    """Send WhatsApp message via pywhatkit. Runs in background thread."""
+    try:
+        import pywhatkit as kit
+        sched = appt["schedule"]
+        clinical = appt.get("clinical", {})
+
+        message = (
+            f"📋 *OpdDoc — Appointment Confirmed*\n\n"
+            f"👨‍⚕️ Doctor: {appt['doctor_name']}\n"
+            f"🏥 Specialty: {appt['specialty']}\n"
+            f"👤 Patient: {appt['patient_info']}\n\n"
+            f"📅 Date: {sched['date']}\n"
+            f"🕐 Time: {sched['time']}\n"
+            f"📍 Location: {sched['location']}\n"
+            f"🏷️ Slot: {sched['slot_type']}\n"
+            f"💰 Fee: {appt['fee']}\n"
+        )
+
+        # ── SOAP / Clinical Summary ──────────────────────────────────
+        if clinical.get("reported_issue") or clinical.get("assessment"):
+            message += f"\n{'─' * 30}\n"
+            message += f"🩺 *CLINICAL ASSESSMENT (SOAP)*\n\n"
+            if clinical.get("reported_issue"):
+                message += f"*S — Reported Issue:*\n{clinical['reported_issue']}\n\n"
+            if clinical.get("key_findings"):
+                message += f"*O — Key Findings:*\n{clinical['key_findings']}\n\n"
+            if clinical.get("assessment"):
+                message += f"*A — Assessment:*\n{clinical['assessment']}\n\n"
+            if clinical.get("plan"):
+                message += f"*P — Plan:*\n{clinical['plan']}\n\n"
+            if clinical.get("red_flags"):
+                message += f"🚩 Red Flags: {clinical['red_flags']}\n"
+            if clinical.get("confidence"):
+                message += f"📊 Confidence: {clinical['confidence']}\n"
+
+        message += (
+            f"\n{'─' * 30}\n"
+            f"📝 {sched['notes']}\n\n"
+            f"Booked at: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            f"Status: Confirmed ✅"
+        )
+
+        kit.sendwhatmsg_instantly(Config.WHATSAPP_PHONE, message)
+        log(f"✓ WhatsApp notification sent for Dr. {appt['doctor_name']}")
+    except Exception as e:
+        log(f"⚠ WhatsApp notification failed: {e}")
+
+
+def send_email_notification(appt: Dict[str, Any]) -> None:
+    """Send confirmation email via SMTP. Runs in background thread."""
+    try:
+        sched = appt["schedule"]
+        clinical = appt.get("clinical", {})
+
+        subject = f"OpdDoc — Appointment Confirmed with {appt['doctor_name']}"
+        body = (
+            f"Your appointment has been successfully booked.\n"
+            f"{'=' * 50}\n\n"
+            f"APPOINTMENT DETAILS\n"
+            f"{'-' * 40}\n"
+            f"  Doctor     : {appt['doctor_name']}\n"
+            f"  Specialty  : {appt['specialty']}\n"
+            f"  Date       : {sched['date']}\n"
+            f"  Time       : {sched['time']}\n"
+            f"  Slot Type  : {sched['slot_type']}\n"
+            f"  Location   : {sched['location']}\n"
+            f"  Fee        : {appt['fee']}\n\n"
+            f"PATIENT\n"
+            f"{'-' * 40}\n"
+            f"  {appt['patient_info']}\n\n"
+        )
+
+        # ── SOAP Clinical Assessment ─────────────────────────────────
+        if clinical.get("reported_issue") or clinical.get("assessment"):
+            body += (
+                f"{'=' * 50}\n"
+                f"CLINICAL ASSESSMENT (SOAP FORMAT)\n"
+                f"{'=' * 50}\n\n"
+            )
+            if clinical.get("reported_issue"):
+                body += (
+                    f"S — SUBJECTIVE (Reported Issue)\n"
+                    f"{'-' * 40}\n"
+                    f"  {clinical['reported_issue']}\n\n"
+                )
+            if clinical.get("key_findings"):
+                body += (
+                    f"O — OBJECTIVE (Key Findings)\n"
+                    f"{'-' * 40}\n"
+                    f"  {clinical['key_findings']}\n\n"
+                )
+            if clinical.get("assessment"):
+                body += (
+                    f"A — ASSESSMENT\n"
+                    f"{'-' * 40}\n"
+                    f"  {clinical['assessment']}\n\n"
+                )
+            if clinical.get("plan"):
+                body += (
+                    f"P — PLAN\n"
+                    f"{'-' * 40}\n"
+                    f"  {clinical['plan']}\n\n"
+                )
+            if clinical.get("red_flags") or clinical.get("confidence"):
+                body += f"  Red Flags  : {clinical.get('red_flags', 'N/A')}\n"
+                body += f"  Confidence : {clinical.get('confidence', 'N/A')}\n\n"
+
+        body += (
+            f"{'=' * 50}\n"
+            f"NOTE: {sched['notes']}\n\n"
+            f"Booked at: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"DISCLAIMER: This is an AI-generated clinical impression for\n"
+            f"triage purposes only. It does NOT replace professional medical\n"
+            f"evaluation. Please consult the doctor during your appointment.\n\n"
+            f"If you need to reschedule, please contact the clinic.\n"
+            f"— OpdDoc AI Medical Assistant\n"
+        )
+
+        msg = MIMEMultipart()
+        msg["From"] = Config.EMAIL_SENDER
+        msg["To"] = Config.EMAIL_RECEIVER
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        server = smtplib.SMTP(Config.EMAIL_SMTP_HOST, Config.EMAIL_SMTP_PORT)
+        server.starttls()
+        server.login(Config.EMAIL_SENDER, Config.EMAIL_APP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        log(f"✓ Email notification sent for Dr. {appt['doctor_name']}")
+    except Exception as e:
+        log(f"⚠ Email notification failed: {e}")
+
+
+def trigger_booking_notifications(appt: Dict[str, Any]) -> None:
+    """Fire WhatsApp + Email notifications in background threads (non-blocking)."""
+    threading.Thread(
+        target=send_whatsapp_notification,
+        args=(appt,),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=send_email_notification,
+        args=(appt,),
+        daemon=True,
+    ).start()
+
+
+@app.route("/book_appointment", methods=["POST"])
+def book_appointment():
+    """Handle appointment booking and trigger WhatsApp + Email notifications."""
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+
+    doctor_name  = (data.get("doctor_name") or "").strip()
+    specialty    = (data.get("specialty") or "").strip()
+    fee          = (data.get("fee") or "").strip()
+    availability = (data.get("availability") or "").strip()
+    patient_info = (data.get("patient_info") or "").strip()
+    clinical_raw = data.get("clinical") or {}
+
+    if not doctor_name:
+        return jsonify({"error": "doctor_name is required"}), 400
+
+    # Resolve scheduled time from the appointment dictionary
+    schedule = _resolve_schedule(availability)
+
+    # Sanitise clinical data — keep only non-empty string values
+    clinical = {
+        k: (v.strip() if isinstance(v, str) else v)
+        for k, v in clinical_raw.items()
+        if v and (not isinstance(v, str) or v.strip())
+    }
+
+    appt = {
+        "doctor_name":  doctor_name,
+        "specialty":    specialty or "General",
+        "fee":          fee or "Consult clinic",
+        "availability": availability,
+        "patient_info": patient_info or "Not provided",
+        "schedule":     schedule,
+        "clinical":     clinical,
+    }
+
+    log(f"📅 Appointment booked: {doctor_name} ({specialty}) "
+        f"| {schedule['date']} @ {schedule['time']} "
+        f"| Patient: {patient_info[:60]} "
+        f"| SOAP attached: {'Yes' if clinical else 'No'}")
+
+    # Fire-and-forget notifications (do not block the HTTP response)
+    trigger_booking_notifications(appt)
+
+    return jsonify({
+        "status": "booked",
+        "doctor_name": doctor_name,
+        "scheduled_date": schedule["date"],
+        "scheduled_time": schedule["time"],
+        "location": schedule["location"],
+        "message": f"Appointment confirmed with {doctor_name} on "
+                   f"{schedule['date']} at {schedule['time']}. "
+                   f"WhatsApp and email confirmations are being sent.",
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 11. SOCKET EVENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1218,9 +1463,8 @@ def on_request_questions(data):
     c["rag_sources"] = src
 
     prompt = build_followup_prompt(c["persona"], c["symptoms"], ctx)
-    chat = apply_chat(STATE["tokenizer"], prompt)
     raw, _ = generate_text(
-        chat,
+        prompt,
         max_new_tokens=150, forbid_pad=True,
     )
     questions = parse_followup_questions(raw)
@@ -1256,33 +1500,43 @@ def on_submit_answer(data):
 
 # ── 11c. Doctor Assessment (SOAP) ────────────────────────────────────────────
 
-@socketio.on("generate_soap")
-def on_generate_soap(data):
-    cid = data["consultation_id"]
-    if cid not in consultations:
-        emit("error", {"message": "Invalid consultation ID"}); return
+def _run_soap_generation(cid: str, label: str = "SOAP") -> Dict[str, Any]:
+    """Shared SOAP generation logic. Returns parsed SOAP dict.
+    Used by both 'generate_soap' and 'generate_soap_for_booking' events."""
     c = consultations[cid]
     fb = _followup_block(c)
 
-    emit("soap_progress", {"message": "Generating clinical assessment..."})
-    log(f"[{cid[:8]}] ── SOAP generating...")
-
+    log(f"[{cid[:8]}] ── {label} generating...")
     t0 = datetime.now()
+
     prompt = build_soap_prompt(c["persona"], c["symptoms"], fb, c["rag_context"])
-    chat = apply_chat(STATE["tokenizer"], prompt)
     text, _ = generate_text(
-        chat,
+        prompt,
         max_new_tokens=Config.SOAP_MAX_TOKENS,
         do_sample=Config.SOAP_DO_SAMPLE,
+        temperature=Config.SOAP_TEMPERATURE,
+        top_p=Config.SOAP_TOP_P,
         forbid_pad=True,
         repetition_penalty=Config.SOAP_REP_PENALTY,
     )
     parsed = parse_soap(text, c["persona"], c["symptoms"], fb)
     elapsed = (datetime.now() - t0).seconds
 
-    log(f"[{cid[:8]}] ── SOAP generated | elapsed={elapsed}s"
+    log(f"[{cid[:8]}] ── {label} done | elapsed={elapsed}s"
         f" | confidence={parsed['confidence']:.0%}"
         f" | red_flags={parsed['red_flags']}")
+
+    return parsed
+
+
+@socketio.on("generate_soap")
+def on_generate_soap(data):
+    cid = data["consultation_id"]
+    if cid not in consultations:
+        emit("error", {"message": "Invalid consultation ID"}); return
+
+    emit("soap_progress", {"message": "Generating clinical assessment..."})
+    parsed = _run_soap_generation(cid, "SOAP")
 
     emit("soap_generated", {
         "reported_issue": parsed["S"],
@@ -1295,6 +1549,27 @@ def on_generate_soap(data):
         },
         "diagnosis": "", "findings": "", "how_found": "",
         "treatment": "", "recovery": "", "urgency": "",
+    })
+
+
+@socketio.on("generate_soap_for_booking")
+def on_generate_soap_for_booking(data):
+    """Auto-triggered when user clicks 'Book an Appointment'
+    and full SOAP data is not yet available."""
+    cid = data.get("consultation_id")
+    if not cid or cid not in consultations:
+        emit("error", {"message": "Invalid consultation ID"}); return
+
+    emit("soap_progress", {"message": "booking an appointment..."})
+    parsed = _run_soap_generation(cid, "SOAP-booking")
+
+    emit("soap_for_booking_ready", {
+        "reported_issue": parsed["S"],
+        "key_findings":   parsed["O"],
+        "assessment":     parsed["A"],
+        "plan":           parsed["P"],
+        "red_flags":      "Yes" if parsed["red_flags"] else "No",
+        "confidence":     f"{int(parsed['confidence'] * 100)}%",
     })
 
 
@@ -1320,9 +1595,8 @@ def on_generate_patient_summary(data):
     # Pass 1
     log(f"[{cid[:8]}]   PASS1 generating...")
     prompt = build_patient_prompt(c["persona"], c["symptoms"], fb, patient_ctx)
-    chat = apply_chat(STATE["tokenizer"], prompt)
     raw1, _ = generate_text(
-        chat,
+        prompt,
         max_new_tokens=Config.PATIENT_MAX_TOKENS,
         do_sample=Config.PATIENT_DO_SAMPLE,
         temperature=Config.PATIENT_TEMPERATURE,
@@ -1339,9 +1613,8 @@ def on_generate_patient_summary(data):
     if n1 < Config.MIN_MODEL_SECTIONS:
         log(f"[{cid[:8]}]   PASS2 generating (only {n1}/6 sections, retrying)...")
         retry_prompt = build_patient_retry_prompt(c["persona"], c["symptoms"], fb)
-        retry_chat = apply_chat(STATE["tokenizer"], retry_prompt)
         raw2, _ = generate_text(
-            retry_chat,
+            retry_prompt,
             max_new_tokens=Config.PATIENT_MAX_TOKENS,
             do_sample=True,
             temperature=Config.RETRY_TEMPERATURE,
@@ -1387,18 +1660,18 @@ if __name__ == "__main__":
     print("  Voice:   Whisper Vulkan GPU (whisper-cli.exe) + VAD")
     print(f"{'=' * 60}\n")
     print("  Make sure BOTH llama-servers are running:\n")
-    print("  Terminal 1 — TranslateGemma (translation):")
-    print("  E:\\llama-gpu\\llama-server.exe -m E:\\llama-gpu\\translategemma-4b-it.Q4_K_M.gguf")
-    print("  -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096\n")
-    print("  Terminal 2 — MedGemma (medical AI):")
+    print("  Terminal 1 — MedGemma (medical AI):")
     print("  E:\\llama-gpu\\llama-server.exe -m E:\\llama-gpu\\medgemma-4b-Q4_K_M.gguf")
-    print(f"  -ngl 34 --host 127.0.0.1 --port 8081 --ctx-size 4096\n")
+    print(f"  -ngl 34 --host 127.0.0.1 --port 8080 --ctx-size 4096\n")
+    print("  Terminal 2 — TranslateGemma (translation):")
+    print("  E:\\llama-gpu\\llama-server.exe -m E:\\llama-gpu\\translategemma-4b-it.Q4_K_M.gguf")
+    print("  -ngl 34 --host 127.0.0.1 --port 8081 --ctx-size 4096\n")
 
     if not initialize_models():
         print("\n✗ INITIALIZATION FAILED")
         print("  Are both llama-servers running?")
-        print("  Check http://127.0.0.1:8080/health (TranslateGemma)")
-        print("  Check http://127.0.0.1:8081/health (MedGemma)")
+        print(f"  Check {Config.LLAMA_SERVER_URL}/health (MedGemma)")
+        print(f"  Check {Config.TRANSLATE_SERVER_URL}/health (TranslateGemma)")
         sys.exit(1)
 
     local_ip = socket.gethostbyname(socket.gethostname())
